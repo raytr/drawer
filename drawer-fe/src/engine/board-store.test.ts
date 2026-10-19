@@ -146,6 +146,21 @@ describe('in a room', () => {
     ]);
   });
 
+  test('loadWelcome takes the server copy of my stroke when the server ended it', () => {
+    const s = new BoardStore();
+    s.startStroke({ id: 'm1', tool: 'b', color: '#111111', width: 8 });
+    s.appendPoints('m1', [1, 1, 2, 2, 3, 3]);
+    s.startStroke({ id: 'm2', tool: 'b', color: '#111111', width: 8 });
+    s.appendPoints('m2', [4, 4, 5, 5]);
+    s.endStroke('m2');
+    s.loadWelcome([
+      w({ id: 'm1', seq: 1, mine: true, pts: [1, 1], batches: 1, done: true }),
+      w({ id: 'm2', seq: 2, mine: true, pts: [4, 4], batches: 1, done: true }),
+    ]);
+    expect(s.get('m1')).toMatchObject({ seq: 1, pts: [1, 1], done: true });
+    expect(s.get('m2')).toMatchObject({ seq: 2, pts: [4, 4], done: true });
+  });
+
   test('adoptAllAsLocal turns visible strokes into pending own strokes, keeping their order', () => {
     const s = new BoardStore();
     s.startStroke({ id: 'p', tool: 'b', color: '#111111', width: 8 });

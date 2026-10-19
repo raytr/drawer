@@ -133,7 +133,8 @@ export class BoardStore {
   /**
    * Takes the board from a `welcome`. Other users' strokes are replaced by the server copy.
    * This tab's own strokes keep their local state (it can hold points the server lacks) and take
-   * only the seq; own strokes the server lacks become pending again, so they get a new seq.
+   * the seq, unless the server already ended them; own strokes the server lacks become pending
+   * again, so they get a new seq.
    */
   loadWelcome(strokes: readonly WelcomeStroke[]): void {
     const incoming = new Map(strokes.map((w) => [w.id, w]));
@@ -146,6 +147,12 @@ export class BoardStore {
       const local = this.strokes.get(w.id);
       if (local?.mine) {
         local.seq = w.seq;
+        // The server ended this stroke (its author was away 30 s) and ignores any later
+        // points: take its copy, so this tab shows what everyone else sees.
+        if (w.done && (!local.done || local.pts.length > w.pts.length)) {
+          local.pts = w.pts.slice();
+          local.done = true;
+        }
         continue;
       }
       this.strokes.set(w.id, {

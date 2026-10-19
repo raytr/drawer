@@ -202,6 +202,43 @@ describe('in a room', () => {
     expect(c.getSnapshot()).toMatchObject({ canUndo: true, canRedo: true });
   });
 
+  test('welcome ends my open strokes that are not being drawn, but not the active one', () => {
+    const r = recorder();
+    const c = new BoardController(undefined, undefined, ids());
+    c.link(r.link);
+    c.beginStroke('b', '#111111', 8);
+    c.addPoint(7, 7);
+    c.flush(0);
+    r.sent.length = 0;
+    const old = { id: 'old', seq: 1, tool: 'b' as const, color: '#111111', width: 8, pts: [1, 1], batches: 1, done: false, deleted: false, mine: true };
+    const active = { id: 's1', seq: 2, tool: 'b' as const, color: '#111111', width: 8, pts: [7, 7], batches: 1, done: false, deleted: false, mine: true };
+    c.handleWelcome({ ...empty, seq: 3, strokes: [old, active] });
+    expect(r.sent).toEqual([['stroke.end', { strokeId: 'old' }]]);
+    expect(c.store.get('old')!.done).toBe(true);
+    expect(c.store.get('s1')!.done).toBe(false);
+  });
+
+  test('a stroke the server ended is not resent and matches the server', () => {
+    const r = recorder();
+    const c = new BoardController(undefined, undefined, ids());
+    c.link(r.link);
+    c.beginStroke('b', '#111111', 8);
+    c.addPoint(1, 1);
+    c.flush(0);
+    r.setUp(false);
+    c.addPoint(2, 2);
+    c.endStroke();
+    r.setUp(true);
+    r.sent.length = 0;
+    c.handleWelcome({
+      ...empty,
+      seq: 3,
+      strokes: [{ id: 's1', seq: 1, tool: 'b', color: '#111111', width: 8, pts: [1, 1], batches: 1, done: true, deleted: false, mine: true }],
+    });
+    expect(r.sent).toEqual([]);
+    expect(c.store.get('s1')!.pts).toEqual([1, 1]);
+  });
+
   test('remote ops reach the store', () => {
     const c = new BoardController(undefined, undefined, ids());
     c.link(recorder().link);

@@ -145,6 +145,8 @@ export class BoardController {
         this.send('stroke.start', { strokeId: stroke.id, tool, color, width });
       }
       this.sendPoints(stroke);
+      // An open stroke that is not being drawn (the tab reloaded mid-stroke) can never go on.
+      if (!stroke.done && stroke.id !== this.activeId) this.store.endStroke(stroke.id);
       if (stroke.done && !w?.done) this.send('stroke.end', { strokeId: stroke.id });
       if (stroke.deleted !== (w?.deleted ?? false)) {
         this.send(stroke.deleted ? 'stroke.undo' : 'stroke.redo', { strokeId: stroke.id });
