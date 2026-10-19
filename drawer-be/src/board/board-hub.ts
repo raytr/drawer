@@ -1,0 +1,293 @@
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type BeforeApplicationShutdown,
+} from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import type { WebSocket } from 'ws';
+import { appConfig, type AppConfig } from '../config/app.config';
+import { hashKey, sameHash } from '../rooms/ids';
+import { RoomStore } from '../rooms/room-store';
+import { RoomsService } from '../rooms/rooms.service';
+import { BoardRoom, type RoomOp } from './board-room';
+import {
+  HelloDto,
+  parseMessage,
+  StrokePointsDto,
+  StrokeRefDto,
+  StrokeStartDto,
+} from './messages';
+import type { ErrorCode, OpEvent, OpKind } from './protocol';
+
+interface Member {
+  roomId: string;
+  memberId: string;
+  /** hashKey(userKey): the author of this member's strokes. */
+  author: string;
+}
+
+interface LoadedRoom {
+  id: string;
+  room: BoardRoom;
+  sockets: Set<WebSocket>;
+  debounce: NodeJS.Timeout | null;
+  maxDelay: NodeJS.Timeout | null;
+  /** Abandoned-stroke timers by author. */
+  abandoned: Map<string, NodeJS.Timeout>;
+}
+
+const DTO_FOR: Record<
+  OpKind,
+  new () => StrokeStartDto | StrokePointsDto | StrokeRefDto
+> = {
+  'stroke.start': StrokeStartDto,
+  'stroke.points': StrokePointsDto,
+  'stroke.end': StrokeRefDto,
+  'stroke.undo': StrokeRefDto,
+  'stroke.redo': StrokeRefDto,
+};
+
+/**
+ * Owns the rooms in memory and the sockets in them (spec 8.2-8.4, 8.6).
+ * Op handling is synchronous; disk work happens only in snapshots and loads.
+ */
+@Injectable()
+export class BoardHub implements BeforeApplicationShutdown {
+  private readonly log = new Logger(BoardHub.name);
+  private readonly members = new Map<WebSocket, Member>();
+  private readonly joining = new Set<WebSocket>();
+  private readonly loaded = new Map<string, LoadedRoom>();
+  private readonly loading = new Map<string, Promise<LoadedRoom>>();
+  private shuttingDown = false;
+
+  constructor(
+    private readonly rooms: RoomsService,
+    private readonly store: RoomStore,
+    @Inject(appConfig.KEY) private readonly cfg: AppConfig,
+  ) {}
+
+  /** True once the socket sent a hello that is being or was accepted. */
+  isJoined(socket: WebSocket): boolean {
+    return this.members.has(socket) || this.joining.has(socket);
+  }
+
+  isLoaded(roomId: string): boolean {
+    return this.loaded.has(roomId) || this.loading.has(roomId);
+  }
+
+  async join(socket: WebSocket, data: unknown): Promise<void> {
+    if (this.isJoined(socket)) return this.sendError(socket, 'bad-op');
+    const hello = parseMessage(HelloDto, data);
+    if (!hello) return this.sendError(socket, 'bad-op');
+    const meta = this.rooms.meta(hello.roomId);
+    if (!meta || this.shuttingDown) {
+      this.sendError(socket, 'not-found');
+      socket.close();
+      return;
+    }
+
+    this.joining.add(socket);
+    let lr: LoadedRoom;
+    try {
+      // A room can be unloaded by another socket's leave while this one waits; load it again then.
+      do lr = await this.load(hello.roomId);
+      while (this.loaded.get(hello.roomId) !== lr);
+    } catch (error) {
+      this.log.error(`load ${hello.roomId} failed`, error as Error);
+      this.sendError(socket, 'not-found');
+      socket.close();
+      return;
+    } finally {
+      this.joining.delete(socket);
+    }
+    if (socket.readyState !== socket.OPEN) {
+      if (lr.sockets.size === 0) await this.unload(lr);
+      return;
+    }
+
+    const author = hashKey(hello.userKey);
+    const member: Member = {
+      roomId: lr.id,
+      memberId: randomBytes(6).toString('base64url'),
+      author,
+    };
+    this.members.set(socket, member);
+    lr.sockets.add(socket);
+    const timer = lr.abandoned.get(author);
+    if (timer) {
+      clearTimeout(timer);
+      lr.abandoned.delete(author);
+    }
+    this.rooms
+      .markJoined(lr.id, Date.now())
+      .catch((error: Error) => this.log.error('markJoined failed', error));
+    const isOwner =
+      hello.ownerToken !== undefined &&
+      sameHash(hashKey(hello.ownerToken), meta.ownerHash);
+    this.send(socket, 'welcome', {
+      seq: lr.room.seq,
+      you: { memberId: member.memberId, isOwner },
+      strokes: lr.room.welcomeFor(author),
+    });
+  }
+
+  op(socket: WebSocket, kind: OpKind, data: unknown): void {
+    const member = this.members.get(socket);
+    const lr = member && this.loaded.get(member.roomId);
+    if (!member || !lr) return this.sendError(socket, 'not-joined');
+    const dto = parseMessage(DTO_FOR[kind], data);
+    if (!dto) return this.sendError(socket, 'bad-op');
+    const result = lr.room.apply(member.author, kind, dto);
+    if (result.kind === 'error')
+      return this.sendError(socket, result.code, result.ref);
+    if (result.kind === 'ignore') return;
+    this.broadcast(lr, result.op, member.memberId, result.echo ? null : socket);
+    this.scheduleSnapshot(lr);
+  }
+
+  async leave(socket: WebSocket): Promise<void> {
+    const member = this.members.get(socket);
+    if (!member) return;
+    this.members.delete(socket);
+    const lr = this.loaded.get(member.roomId);
+    if (!lr || this.shuttingDown) return;
+    lr.sockets.delete(socket);
+    if (lr.sockets.size === 0) return this.unload(lr);
+    const authorStays = [...lr.sockets].some(
+      (s) => this.members.get(s)?.author === member.author,
+    );
+    if (!authorStays && !lr.abandoned.has(member.author)) {
+      const timer = setTimeout(
+        () => this.endAbandoned(lr, member.author),
+        this.cfg.abandonedStrokeMs,
+      );
+      timer.unref();
+      lr.abandoned.set(member.author, timer);
+    }
+  }
+
+  /** Writes every loaded room before Nest closes the sockets, so a restart loses nothing. */
+  async beforeApplicationShutdown(): Promise<void> {
+    this.shuttingDown = true;
+    const writes: Promise<void>[] = [];
+    for (const lr of this.loaded.values()) {
+      this.clearTimers(lr);
+      writes.push(this.store.writeStrokes(lr.id, lr.room.toFile(false)));
+      for (const socket of lr.sockets) socket.close(1001);
+    }
+    await Promise.allSettled(writes);
+  }
+
+  private load(id: string): Promise<LoadedRoom> {
+    const ready = this.loaded.get(id);
+    if (ready) return Promise.resolve(ready);
+    let pending = this.loading.get(id);
+    if (!pending) {
+      pending = this.store
+        .readStrokes(id)
+        .then((file) => {
+          const lr: LoadedRoom = {
+            id,
+            room: new BoardRoom(file ?? undefined),
+            sockets: new Set(),
+            debounce: null,
+            maxDelay: null,
+            abandoned: new Map(),
+          };
+          this.loaded.set(id, lr);
+          return lr;
+        })
+        .finally(() => this.loading.delete(id));
+      this.loading.set(id, pending);
+    }
+    return pending;
+  }
+
+  /** Last socket left: end open strokes, write a compacted snapshot, and drop the room from memory. */
+  private async unload(lr: LoadedRoom): Promise<void> {
+    this.clearTimers(lr);
+    lr.room.endAllUnfinished();
+    this.loaded.delete(lr.id);
+    const now = Date.now();
+    try {
+      await Promise.all([
+        this.store.writeStrokes(lr.id, lr.room.toFile(true)),
+        this.rooms.markIdle(lr.id, now),
+      ]);
+    } catch (error) {
+      this.log.error(`unload ${lr.id} failed`, error as Error);
+    }
+  }
+
+  private endAbandoned(lr: LoadedRoom, author: string): void {
+    lr.abandoned.delete(author);
+    if (this.loaded.get(lr.id) !== lr) return;
+    const ops = lr.room.endAllUnfinished(author);
+    for (const op of ops) this.broadcast(lr, op, null, null);
+    if (ops.length > 0) this.scheduleSnapshot(lr);
+  }
+
+  /** Writes 2 s after the last change, but never later than 10 s after the first unsaved one. */
+  private scheduleSnapshot(lr: LoadedRoom): void {
+    if (lr.debounce) clearTimeout(lr.debounce);
+    lr.debounce = setTimeout(
+      () => this.snapshot(lr),
+      this.cfg.snapshotDebounceMs,
+    );
+    lr.debounce.unref();
+    if (!lr.maxDelay) {
+      lr.maxDelay = setTimeout(
+        () => this.snapshot(lr),
+        this.cfg.snapshotMaxDelayMs,
+      );
+      lr.maxDelay.unref();
+    }
+  }
+
+  private snapshot(lr: LoadedRoom): void {
+    if (lr.debounce) clearTimeout(lr.debounce);
+    if (lr.maxDelay) clearTimeout(lr.maxDelay);
+    lr.debounce = null;
+    lr.maxDelay = null;
+    if (!lr.room.dirty || this.loaded.get(lr.id) !== lr) return;
+    lr.room.markClean();
+    this.store
+      .writeStrokes(lr.id, lr.room.toFile(false))
+      .catch((error: Error) =>
+        this.log.error(`snapshot ${lr.id} failed`, error),
+      );
+  }
+
+  private clearTimers(lr: LoadedRoom): void {
+    if (lr.debounce) clearTimeout(lr.debounce);
+    if (lr.maxDelay) clearTimeout(lr.maxDelay);
+    lr.debounce = null;
+    lr.maxDelay = null;
+    for (const timer of lr.abandoned.values()) clearTimeout(timer);
+    lr.abandoned.clear();
+  }
+
+  private broadcast(
+    lr: LoadedRoom,
+    op: RoomOp,
+    by: string | null,
+    except: WebSocket | null,
+  ): void {
+    const event: OpEvent = { ...op, by };
+    const text = JSON.stringify({ event: 'op', data: event });
+    for (const socket of lr.sockets) {
+      if (socket !== except && socket.readyState === socket.OPEN)
+        socket.send(text);
+    }
+  }
+
+  private sendError(socket: WebSocket, code: ErrorCode, ref?: string): void {
+    this.send(socket, 'error', ref === undefined ? { code } : { code, ref });
+  }
+
+  private send(socket: WebSocket, event: string, data: unknown): void {
+    if (socket.readyState === socket.OPEN)
+      socket.send(JSON.stringify({ event, data }));
+  }
+}

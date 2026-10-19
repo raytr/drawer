@@ -16,7 +16,8 @@ import type { RoomMeta, StrokesFile } from './room-files';
  * real file with rename, so a crash never leaves half a file.
  * Writes and deletes of one room run one after another, and reads of that room
  * wait for them: the last call wins, and a read never sees an older file than a
- * write that was already called.
+ * write that was already called. Values are serialized when the write is called,
+ * so later changes to a live room never leak into a queued write.
  */
 @Injectable()
 export class RoomStore {
@@ -30,8 +31,9 @@ export class RoomStore {
   }
 
   writeMeta(id: string, meta: RoomMeta): Promise<void> {
+    const text = JSON.stringify(meta);
     return this.enqueue(id, () =>
-      this.writeAtomic(this.file(id, 'json'), meta),
+      this.writeAtomic(this.file(id, 'json'), text),
     );
   }
 
@@ -59,8 +61,9 @@ export class RoomStore {
   }
 
   writeStrokes(id: string, file: StrokesFile): Promise<void> {
+    const text = JSON.stringify(file);
     return this.enqueue(id, () =>
-      this.writeAtomic(this.file(id, 'strokes'), file),
+      this.writeAtomic(this.file(id, 'strokes'), text),
     );
   }
 
@@ -94,11 +97,11 @@ export class RoomStore {
     await this.queues.get(id);
   }
 
-  private async writeAtomic(target: string, value: unknown): Promise<void> {
+  private async writeAtomic(target: string, text: string): Promise<void> {
     this.dirReady ??= mkdir(this.dir, { recursive: true });
     await this.dirReady;
     const tmp = `${target}.${process.pid}.${this.tmpCounter++}.tmp`;
-    await writeFile(tmp, JSON.stringify(value));
+    await writeFile(tmp, text);
     await rename(tmp, target);
   }
 
