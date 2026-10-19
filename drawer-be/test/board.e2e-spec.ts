@@ -225,6 +225,19 @@ describe('board gateway (e2e)', () => {
     });
   });
 
+  it('a deeply nested hello gets bad-op and the server keeps serving', async () => {
+    const { roomId } = await createRoom();
+    // Built as text: JSON.stringify itself overflows on this depth (about 54 KB, under 64 KiB).
+    const name = '{"a":'.repeat(9000) + '"x"' + '}'.repeat(9000);
+    const c = await open();
+    c.sendRaw(
+      `{"event":"hello","data":{"roomId":"${roomId}","userKey":"${KEY_A}","name":${name},"color":"#1971c2"}}`,
+    );
+    expect(await c.next('error')).toEqual({ code: 'bad-op' });
+    const b = await join(roomId, KEY_B);
+    expect(b.welcome.seq).toBe(0);
+  });
+
   it('the last leave writes a compacted snapshot and the room reloads', async () => {
     const { roomId } = await createRoom();
     const a = await join(roomId, KEY_A);

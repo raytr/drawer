@@ -138,3 +138,29 @@ describe('parseMessage', () => {
     ).toBeUndefined();
   });
 });
+
+describe('parseMessage with hostile nesting', () => {
+  function nested(depth: number): unknown {
+    let v: unknown = 'x';
+    for (let i = 0; i < depth; i++) v = { a: v };
+    return v;
+  }
+
+  it('rejects a deeply nested field without throwing', () => {
+    const data = {
+      roomId: id,
+      userKey: id,
+      name: nested(9000),
+      color: '#1971c2',
+    };
+    expect(() => parseMessage(HelloDto, data)).not.toThrow();
+    expect(parseMessage(HelloDto, data)).toBeNull();
+  });
+
+  it('rejects nested objects and nested arrays in any field', () => {
+    expect(parseMessage(StrokeRefDto, { strokeId: { a: 1 } })).toBeNull();
+    expect(
+      parseMessage(StrokePointsDto, { strokeId: id, n: 0, pts: [[1, 2]] }),
+    ).toBeNull();
+  });
+});

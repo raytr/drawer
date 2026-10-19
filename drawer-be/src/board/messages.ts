@@ -67,22 +67,40 @@ export class StrokeRefDto {
   @IsString() @Matches(ID_22) strokeId: string;
 }
 
+/** Every DTO here is flat: each field is a string, a number, a boolean, or a list of numbers. */
+function isFlat(data: object): boolean {
+  for (const value of Object.values(data)) {
+    if (value === null || typeof value !== 'object') continue;
+    if (!Array.isArray(value) || value.some((v) => typeof v !== 'number'))
+      return false;
+  }
+  return true;
+}
+
 /**
  * Turns the data of one message into a validated DTO, or null.
- * Unknown keys, wrong types, and anything that is not a plain object are rejected.
+ * Unknown keys, wrong types, nested values, and anything that is not a plain object are
+ * rejected. Nested values are refused before class-transformer sees them, because it
+ * recurses into them and a deep one would overflow the stack.
  */
 export function parseMessage<T extends object>(
   cls: new () => T,
   data: unknown,
 ): T | null {
-  if (typeof data !== 'object' || data === null || Array.isArray(data))
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     return null;
+  }
   if (Object.prototype.hasOwnProperty.call(data, '__proto__')) return null;
-  const dto = plainToInstance(cls, data);
-  const errors = validateSync(dto, {
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    forbidUnknownValues: true,
-  });
-  return errors.length === 0 ? dto : null;
+  if (!isFlat(data)) return null;
+  try {
+    const dto = plainToInstance(cls, data);
+    const errors = validateSync(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      forbidUnknownValues: true,
+    });
+    return errors.length === 0 ? dto : null;
+  } catch {
+    return null;
+  }
 }

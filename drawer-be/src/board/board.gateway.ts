@@ -1,4 +1,4 @@
-import { Inject } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -17,6 +17,8 @@ const CLOSE_NO_HELLO = 1008;
 /** WebSocket /ws on the REST port. Messages are JSON { event, data } (spec 6.1). */
 @WebSocketGateway({ path: '/ws', maxPayload: 65536 })
 export class BoardGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly log = new Logger(BoardGateway.name);
+
   constructor(
     private readonly hub: BoardHub,
     @Inject(appConfig.KEY) private readonly cfg: AppConfig,
@@ -31,7 +33,9 @@ export class BoardGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(socket: WebSocket): void {
-    void this.hub.leave(socket);
+    this.hub
+      .leave(socket)
+      .catch((error: Error) => this.log.error('leave failed', error));
   }
 
   @SubscribeMessage('hello')
@@ -39,7 +43,9 @@ export class BoardGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: WebSocket,
     @MessageBody() data: unknown,
   ): void {
-    void this.hub.join(socket, data);
+    this.hub
+      .join(socket, data)
+      .catch((error: Error) => this.log.error('hello failed', error));
   }
 
   @SubscribeMessage('stroke.start')
