@@ -43,6 +43,11 @@ export class BoardRoom {
     this._dirty = false;
   }
 
+  /** Used when a snapshot write failed, so the next snapshot tries again. */
+  markDirty(): void {
+    this._dirty = true;
+  }
+
   apply(
     author: string,
     kind: OpKind,

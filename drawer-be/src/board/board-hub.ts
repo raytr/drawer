@@ -35,7 +35,13 @@ interface LoadedRoom {
   maxDelay: NodeJS.Timeout | null;
   /** Abandoned-stroke timers by author. */
   abandoned: Map<string, NodeJS.Timeout>;
+  /** Retry of an unload whose write failed. */
+  retry: NodeJS.Timeout | null;
 }
+
+/** Close codes for temporary conditions: the client reconnects. */
+const CLOSE_SERVER_ERROR = 1011;
+const CLOSE_RESTARTING = 1012;
 
 const DTO_FOR: Record<
   OpKind,
@@ -80,8 +86,10 @@ export class BoardHub implements BeforeApplicationShutdown {
     if (this.isJoined(socket)) return this.sendError(socket, 'bad-op');
     const hello = parseMessage(HelloDto, data);
     if (!hello) return this.sendError(socket, 'bad-op');
+    // Temporary conditions close without not-found, so the client keeps retrying (spec 8.6).
+    if (this.shuttingDown) return socket.close(CLOSE_RESTARTING);
     const meta = this.rooms.meta(hello.roomId);
-    if (!meta || this.shuttingDown) {
+    if (!meta) {
       this.sendError(socket, 'not-found');
       socket.close();
       return;
@@ -95,8 +103,7 @@ export class BoardHub implements BeforeApplicationShutdown {
       while (this.loaded.get(hello.roomId) !== lr);
     } catch (error) {
       this.log.error(`load ${hello.roomId} failed`, error as Error);
-      this.sendError(socket, 'not-found');
-      socket.close();
+      socket.close(CLOSE_SERVER_ERROR);
       return;
     } finally {
       this.joining.delete(socket);
@@ -187,6 +194,7 @@ export class BoardHub implements BeforeApplicationShutdown {
             debounce: null,
             maxDelay: null,
             abandoned: new Map(),
+            retry: null,
           };
           this.loaded.set(id, lr);
           // Open strokes from the file get the same 30 s grace as after a leave (spec 8.3).
@@ -205,17 +213,36 @@ export class BoardHub implements BeforeApplicationShutdown {
    * Open strokes stay open; the next load restarts their 30 s grace.
    */
   private async unload(lr: LoadedRoom): Promise<void> {
-    this.clearTimers(lr);
-    this.loaded.delete(lr.id);
-    const now = Date.now();
+    // The room stays in memory until its file is written (spec 11: keep it loaded on failure).
+    this.clearSnapshotTimers(lr);
+    const seq = lr.room.seq;
     try {
       await Promise.all([
         this.store.writeStrokes(lr.id, lr.room.toFile(true)),
-        this.rooms.markIdle(lr.id, now),
+        this.rooms.markIdle(lr.id, Date.now()),
       ]);
     } catch (error) {
       this.log.error(`unload ${lr.id} failed`, error as Error);
+      if (!lr.retry) {
+        lr.retry = setTimeout(() => {
+          lr.retry = null;
+          if (lr.sockets.size === 0 && this.loaded.get(lr.id) === lr)
+            void this.unload(lr);
+        }, this.cfg.snapshotMaxDelayMs);
+        lr.retry.unref();
+      }
+      return;
     }
+    if (
+      lr.sockets.size > 0 ||
+      this.loaded.get(lr.id) !== lr ||
+      this.shuttingDown
+    )
+      return;
+    // Something changed while writing (an abandoned stroke ended): write again.
+    if (lr.room.seq !== seq) return this.unload(lr);
+    this.clearTimers(lr);
+    this.loaded.delete(lr.id);
   }
 
   private startAbandonTimer(lr: LoadedRoom, author: string): void {
@@ -262,16 +289,25 @@ export class BoardHub implements BeforeApplicationShutdown {
     lr.room.markClean();
     this.store
       .writeStrokes(lr.id, lr.room.toFile(false))
-      .catch((error: Error) =>
-        this.log.error(`snapshot ${lr.id} failed`, error),
-      );
+      .catch((error: Error) => {
+        this.log.error(`snapshot ${lr.id} failed`, error);
+        if (this.loaded.get(lr.id) !== lr) return;
+        lr.room.markDirty();
+        this.scheduleSnapshot(lr);
+      });
   }
 
-  private clearTimers(lr: LoadedRoom): void {
+  private clearSnapshotTimers(lr: LoadedRoom): void {
     if (lr.debounce) clearTimeout(lr.debounce);
     if (lr.maxDelay) clearTimeout(lr.maxDelay);
     lr.debounce = null;
     lr.maxDelay = null;
+  }
+
+  private clearTimers(lr: LoadedRoom): void {
+    this.clearSnapshotTimers(lr);
+    if (lr.retry) clearTimeout(lr.retry);
+    lr.retry = null;
     for (const timer of lr.abandoned.values()) clearTimeout(timer);
     lr.abandoned.clear();
   }
