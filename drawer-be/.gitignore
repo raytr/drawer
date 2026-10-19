@@ -1,0 +1,14 @@
+# BEGIN: minimal-vibe-coding-kit
+.autoresearch/
+results.tsv
+.vibekit/INIT_DONE
+.vibekit/FINALIZE_DONE
+.vibekit/preferences.json
+.vibekit/parallel-analysis.json
+.vibekit/reports/
+.vibekit/update-backup/
+.vibekit/local/
+_vibekit-cleanup/
+CLAUDE.local.md
+MEMENTO.md
+# END: minimal-vibe-coding-kit
