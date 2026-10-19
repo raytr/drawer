@@ -342,6 +342,55 @@ describe('board gateway (e2e)', () => {
     });
   });
 
+  it('a reconnect ends with every client on the same board, even for a solo author who dropped mid-stroke', async () => {
+    const { roomId } = await createRoom();
+    const a = await join(roomId, KEY_A);
+    a.c.send('stroke.start', {
+      strokeId: S1,
+      tool: 'b',
+      color: '#111111',
+      width: 4,
+    });
+    a.c.send('stroke.points', { strokeId: S1, n: 0, pts: [1, 1, 2, 2] });
+    await a.c.next('op', (d) => d.kind === 'stroke.start');
+    await new Promise((r) => setTimeout(r, 30));
+    a.c.close();
+    await waitFor(() => strokesFile(roomId)?.strokes.length === 1);
+    const back = await join(roomId, KEY_A);
+    expect(back.welcome.strokes).toMatchObject([
+      { id: S1, pts: [1, 1, 2, 2], batches: 1, done: false, mine: true },
+    ]);
+    back.c.send('stroke.points', { strokeId: S1, n: 1, pts: [3, 3] });
+    back.c.send('stroke.end', { strokeId: S1 });
+    await back.c.next('op', (d) => d.kind === 'stroke.end');
+    const late = await join(roomId, KEY_B);
+    expect(late.welcome.strokes).toMatchObject([
+      { id: S1, pts: [1, 1, 2, 2, 3, 3], done: true, mine: false },
+    ]);
+  });
+
+  it('open strokes loaded from a snapshot end when their author does not return', async () => {
+    const { roomId } = await createRoom();
+    const a = await join(roomId, KEY_A);
+    a.c.send('stroke.start', {
+      strokeId: S1,
+      tool: 'b',
+      color: '#111111',
+      width: 4,
+    });
+    await a.c.next('op', (d) => d.kind === 'stroke.start');
+    a.c.close();
+    await waitFor(() => strokesFile(roomId)?.strokes.length === 1);
+    const b = await join(roomId, KEY_B);
+    expect(b.welcome.strokes).toMatchObject([{ id: S1, done: false }]);
+    expect(await b.c.next('op', (d) => d.kind === 'stroke.end', 1000)).toEqual({
+      seq: 2,
+      by: null,
+      kind: 'stroke.end',
+      strokeId: S1,
+    });
+  });
+
   it('an abandoned unfinished stroke is ended by the server', async () => {
     const { roomId } = await createRoom();
     const a = await join(roomId, KEY_A);

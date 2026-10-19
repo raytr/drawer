@@ -169,3 +169,14 @@ describe('BoardRoom', () => {
     expect(r.dirty).toBe(false);
   });
 });
+
+describe('BoardRoom.openAuthors', () => {
+  it('lists each author of an unfinished stroke once', () => {
+    const r = new BoardRoom();
+    start(r, A, S1);
+    start(r, A, 'S'.repeat(21) + '3');
+    start(r, B, S2);
+    r.apply(B, 'stroke.end', { strokeId: S2 });
+    expect(r.openAuthors()).toEqual([A]);
+  });
+});

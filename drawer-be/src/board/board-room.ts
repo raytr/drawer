@@ -94,6 +94,15 @@ export class BoardRoom {
     return ops;
   }
 
+  /** Authors (hashes) with at least one unfinished stroke, each once. */
+  openAuthors(): string[] {
+    const authors = new Set<string>();
+    for (const stroke of this.strokes.values()) {
+      if (!stroke.done) authors.add(stroke.author);
+    }
+    return [...authors];
+  }
+
   /** `compact` drops deleted strokes; used when the room is unloaded. */
   toFile(compact: boolean): StrokesFile {
     const strokes = [...this.strokes.values()].filter(

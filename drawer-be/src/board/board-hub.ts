@@ -157,14 +157,7 @@ export class BoardHub implements BeforeApplicationShutdown {
     const authorStays = [...lr.sockets].some(
       (s) => this.members.get(s)?.author === member.author,
     );
-    if (!authorStays && !lr.abandoned.has(member.author)) {
-      const timer = setTimeout(
-        () => this.endAbandoned(lr, member.author),
-        this.cfg.abandonedStrokeMs,
-      );
-      timer.unref();
-      lr.abandoned.set(member.author, timer);
-    }
+    if (!authorStays) this.startAbandonTimer(lr, member.author);
   }
 
   /** Writes every loaded room before Nest closes the sockets, so a restart loses nothing. */
@@ -196,6 +189,9 @@ export class BoardHub implements BeforeApplicationShutdown {
             abandoned: new Map(),
           };
           this.loaded.set(id, lr);
+          // Open strokes from the file get the same 30 s grace as after a leave (spec 8.3).
+          for (const author of lr.room.openAuthors())
+            this.startAbandonTimer(lr, author);
           return lr;
         })
         .finally(() => this.loading.delete(id));
@@ -204,10 +200,12 @@ export class BoardHub implements BeforeApplicationShutdown {
     return pending;
   }
 
-  /** Last socket left: end open strokes, write a compacted snapshot, and drop the room from memory. */
+  /**
+   * Last socket left: write a compacted snapshot and drop the room from memory.
+   * Open strokes stay open; the next load restarts their 30 s grace.
+   */
   private async unload(lr: LoadedRoom): Promise<void> {
     this.clearTimers(lr);
-    lr.room.endAllUnfinished();
     this.loaded.delete(lr.id);
     const now = Date.now();
     try {
@@ -218,6 +216,16 @@ export class BoardHub implements BeforeApplicationShutdown {
     } catch (error) {
       this.log.error(`unload ${lr.id} failed`, error as Error);
     }
+  }
+
+  private startAbandonTimer(lr: LoadedRoom, author: string): void {
+    if (lr.abandoned.has(author)) return;
+    const timer = setTimeout(
+      () => this.endAbandoned(lr, author),
+      this.cfg.abandonedStrokeMs,
+    );
+    timer.unref();
+    lr.abandoned.set(author, timer);
   }
 
   private endAbandoned(lr: LoadedRoom, author: string): void {
