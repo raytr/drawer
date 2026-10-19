@@ -46,3 +46,24 @@ test('clear on an empty board records nothing', () => {
   h.clear();
   expect(h.canUndo).toBe(false);
 });
+
+test('rebuild sets the undo stack; onApply reports undo and redo', () => {
+  const store = new BoardStore();
+  const h = new History(store);
+  store.startStroke({ id: 'a', tool: 'b', color: '#111111', width: 8 });
+  store.startStroke({ id: 'b', tool: 'b', color: '#111111', width: 8 });
+  h.recordStroke('b');
+  h.undo();
+  const seen: Array<[string, boolean]> = [];
+  h.onApply = (e, undo) => seen.push([e.kind === 'stroke' ? e.id : 'clear', undo]);
+  h.rebuild(['a']);
+  expect(h.canRedo).toBe(false);
+  expect(h.canUndo).toBe(true);
+  h.undo();
+  expect(store.get('a')!.deleted).toBe(true);
+  h.redo();
+  expect(seen).toEqual([
+    ['a', true],
+    ['a', false],
+  ]);
+});
