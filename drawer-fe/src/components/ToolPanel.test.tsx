@@ -6,7 +6,7 @@ import { ToolPanel } from './ToolPanel';
 const snap = { canUndo: false, canRedo: false, hasVisible: true, drawing: false };
 
 function setup(over = {}) {
-  const p = { settings: initialToolSettings, dispatch: vi.fn(), snapshot: snap, onUndo: vi.fn(), onRedo: vi.fn(), onClear: vi.fn(), ...over };
+  const p = { settings: initialToolSettings, dispatch: vi.fn(), snapshot: snap, onUndo: vi.fn(), onRedo: vi.fn(), onClear: vi.fn(), canClear: true, ...over };
   render(<ToolPanel {...p} />);
   return p;
 }
@@ -36,4 +36,9 @@ test('clear needs a confirmation inside the page', async () => {
   expect(screen.getByText('Clear the whole board?')).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
   expect(p.onClear).toHaveBeenCalledTimes(1);
+});
+
+test('the Clear button is not shown when clearing is not allowed', () => {
+  setup({ canClear: false });
+  expect(screen.queryByRole('button', { name: 'Clear board' })).toBeNull();
 });

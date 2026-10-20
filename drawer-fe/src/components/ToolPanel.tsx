@@ -13,16 +13,18 @@ export interface ToolPanelProps {
   onUndo(): void;
   onRedo(): void;
   onClear(): void;
+  /** False in a room: only the owner will clear there (M4). */
+  canClear: boolean;
 }
 
-export function ToolPanel({ settings, dispatch, snapshot, onUndo, onRedo, onClear }: ToolPanelProps) {
+export function ToolPanel({ settings, dispatch, snapshot, onUndo, onRedo, onClear, canClear }: ToolPanelProps) {
   return (
     <aside className="tool-panel" aria-label="Tools">
       <ToolPicker tool={settings.tool} dispatch={dispatch} />
       <ColorSwatches color={settings.color} dispatch={dispatch} />
       <SizeSlider width={settings.width} dispatch={dispatch} />
       <HistoryButtons canUndo={snapshot.canUndo} canRedo={snapshot.canRedo} onUndo={onUndo} onRedo={onRedo} />
-      <ClearButton disabled={!snapshot.hasVisible} onClear={onClear} />
+      {canClear && <ClearButton disabled={!snapshot.hasVisible} onClear={onClear} />}
     </aside>
   );
 }

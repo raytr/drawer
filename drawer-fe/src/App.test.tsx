@@ -6,9 +6,9 @@ test('shows the app name', () => {
   expect(screen.getByText('drawer')).toBeInTheDocument();
 });
 
-test('the board page shows the tools and a disabled Share button', () => {
+test('the board page shows the tools and an enabled Share button', () => {
   render(<App />);
   expect(screen.getByRole('button', { name: 'Brush' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Share' })).toBeEnabled();
   expect(screen.getByText('Local only')).toBeInTheDocument();
 });

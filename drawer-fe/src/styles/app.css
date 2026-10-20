@@ -82,8 +82,87 @@ button[aria-pressed='true'] {
   color: var(--muted);
 }
 
+.status-pending {
+  background: #fff3bf;
+  color: #7a5a00;
+}
+
+.status-live {
+  background: #d3f9d8;
+  color: #1b6b2a;
+}
+
 .share-button {
   margin-left: auto;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.share-error {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--danger);
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(22, 25, 30, 0.35);
+}
+
+.share-dialog,
+.expired-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(440px, 100%);
+  padding: 20px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.share-dialog h2,
+.expired-card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.share-dialog p,
+.expired-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.share-link {
+  display: flex;
+  gap: 8px;
+}
+
+.share-link input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.dialog-close {
+  align-self: flex-end;
 }
 
 .board-main {
