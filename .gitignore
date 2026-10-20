@@ -1,3 +1,5 @@
+.idea
+
 # BEGIN: minimal-vibe-coding-kit
 drawer-be/.autoresearch/
 drawer-be/results.tsv
@@ -17,6 +19,8 @@ drawer-be/backbone.yml
 drawer-be/CLAUDE.md
 drawer-be/opencode.json
 drawer-be/AGENTS.md
+drawer-be/.idea
+drawer-be/docs
 
 drawer-fe/.autoresearch/
 drawer-fe/results.tsv
@@ -35,5 +39,6 @@ drawer-fe/backbone.yml
 drawer-fe/CLAUDE.md
 drawer-fe/opencode.json
 drawer-fe/AGENTS.md
+drawer-fe/.idea
 
 # END: minimal-vibe-coding-kit
