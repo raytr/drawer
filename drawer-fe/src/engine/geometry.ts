@@ -31,3 +31,16 @@ export function toBoardPoint(
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
+
+/** Like toBoardPoint, but null when the pointer is outside the board (in the letterbox or beyond). */
+export function toBoardPointInside(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number },
+  fit: Fit,
+): [number, number] | null {
+  const x = (clientX - rect.left - fit.offsetX) / fit.scale;
+  const y = (clientY - rect.top - fit.offsetY) / fit.scale;
+  if (!(x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT)) return null;
+  return [Math.min(BOARD_WIDTH - 1, Math.round(x)), Math.min(BOARD_HEIGHT - 1, Math.round(y))];
+}
