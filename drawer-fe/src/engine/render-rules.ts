@@ -20,3 +20,8 @@ export function safeStyle(stroke: Stroke): { color: string; width: number } {
   const width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(stroke.width) || MIN_WIDTH));
   return { color, width };
 }
+
+/** Member colors come from other users, so they are checked before use in CSS. */
+export function safeColor(color: string): string {
+  return COLOR.test(color) ? color : '#868e96';
+}
