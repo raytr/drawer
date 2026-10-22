@@ -472,4 +472,37 @@ describe('board gateway (e2e)', () => {
       expect(a.welcome.you.memberId).not.toBe(a2.welcome.you.memberId);
     });
   });
+
+  describe('cursor', () => {
+    it('a cursor goes to the others with the memberId, not back to the sender', async () => {
+      const { roomId } = await createRoom();
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B);
+      a.c.send('cursor', { x: 10, y: 20 });
+      expect(await b.c.next('cursor')).toEqual({
+        memberId: a.welcome.you.memberId,
+        x: 10,
+        y: 20,
+      });
+      await a.c.none('cursor');
+    });
+
+    it('a null cursor is relayed; a bad one gets bad-op; before hello it gets not-joined', async () => {
+      const { roomId } = await createRoom();
+      const early = await open();
+      early.send('cursor', { x: 1, y: 1 });
+      expect(await early.next('error')).toEqual({ code: 'not-joined' });
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B);
+      a.c.send('cursor', { x: null, y: null });
+      expect(await b.c.next('cursor')).toEqual({
+        memberId: a.welcome.you.memberId,
+        x: null,
+        y: null,
+      });
+      a.c.send('cursor', { x: 5000, y: 1 });
+      expect(await a.c.next('error')).toEqual({ code: 'bad-op' });
+      await b.c.none('cursor', (d) => d.x === 5000);
+    });
+  });
 });

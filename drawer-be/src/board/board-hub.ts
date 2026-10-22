@@ -12,6 +12,7 @@ import { RoomStore } from '../rooms/room-store';
 import { RoomsService } from '../rooms/rooms.service';
 import { BoardRoom, type RoomOp } from './board-room';
 import {
+  CursorDto,
   HelloDto,
   parseMessage,
   StrokePointsDto,
@@ -157,6 +158,22 @@ export class BoardHub implements BeforeApplicationShutdown {
     if (result.kind === 'ignore') return;
     this.broadcast(lr, result.op, member.memberId, result.echo ? null : socket);
     this.scheduleSnapshot(lr);
+  }
+
+  /** Relays a cursor to the other members of the room. Never stored, no seq. */
+  cursor(socket: WebSocket, data: unknown): void {
+    const member = this.members.get(socket);
+    const lr = member && this.loaded.get(member.roomId);
+    if (!member || !lr) return this.sendError(socket, 'not-joined');
+    const dto = parseMessage(CursorDto, data);
+    if (!dto) return this.sendError(socket, 'bad-op');
+    const text = JSON.stringify({
+      event: 'cursor',
+      data: { memberId: member.memberId, x: dto.x, y: dto.y },
+    });
+    for (const other of lr.sockets) {
+      if (other !== socket && other.readyState === other.OPEN) other.send(text);
+    }
   }
 
   async leave(socket: WebSocket): Promise<void> {

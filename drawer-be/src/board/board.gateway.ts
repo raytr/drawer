@@ -48,6 +48,14 @@ export class BoardGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .catch((error: Error) => this.log.error('hello failed', error));
   }
 
+  @SubscribeMessage('cursor')
+  cursor(
+    @ConnectedSocket() socket: WebSocket,
+    @MessageBody() data: unknown,
+  ): void {
+    this.hub.cursor(socket, data);
+  }
+
   @SubscribeMessage('stroke.start')
   start(
     @ConnectedSocket() socket: WebSocket,
