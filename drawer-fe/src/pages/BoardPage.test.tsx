@@ -126,3 +126,24 @@ test('an expired room shows the expired page; a new board keeps the drawing', as
   expect(fresh.sent.map((m) => m.event)).toEqual(['hello', 'stroke.start', 'stroke.points', 'stroke.end']);
   expect(screen.queryByRole('heading', { name: 'This board has expired' })).toBeNull();
 });
+
+test('an expired room still lets you draw locally, and a new board keeps that drawing', async () => {
+  history.replaceState(null, '', '/r/' + ROOM);
+  mockCreate.mockResolvedValue({ roomId: ROOM2, ownerToken: TOKEN });
+  const { container } = render(<BoardPage />);
+  const socket = FakeSocket.last();
+  act(() => socket.open());
+  act(() => socket.receive('error', { code: 'not-found' }));
+  // A notice, not a modal: the board stays usable (spec 10: drawing yes, local only).
+  expect(screen.getByRole('region', { name: 'This board has expired' })).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(container.ownerDocument.querySelector('.dialog-backdrop')).toBeNull();
+  drawOneStroke(container);
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Start a new board from this drawing' }));
+  await screen.findByRole('dialog', { name: 'Share this board' });
+  const fresh = FakeSocket.last();
+  act(() => fresh.open());
+  act(() => fresh.receive('welcome', welcome));
+  expect(fresh.sent.map((m) => m.event)).toEqual(['hello', 'stroke.start', 'stroke.points', 'stroke.end']);
+});

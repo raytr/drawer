@@ -165,6 +165,14 @@ button.primary {
   align-self: flex-end;
 }
 
+.expired-notice {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(440px, calc(100% - 32px));
+}
+
 .board-main {
   display: grid;
   grid-template-columns: 1fr 240px;
