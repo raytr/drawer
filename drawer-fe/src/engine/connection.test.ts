@@ -129,3 +129,22 @@ test('stop closes the socket and never reconnects', () => {
   vi.advanceTimersByTime(60_000);
   expect(FakeSocket.instances).toHaveLength(1);
 });
+
+test('passes presence and cursor on while live', () => {
+  const { c } = makeConnection();
+  const presence: unknown[] = [];
+  const cursors: unknown[] = [];
+  c.onPresence = (d) => presence.push(d);
+  c.onCursor = (d) => cursors.push(d);
+  c.start();
+  FakeSocket.last().open();
+  FakeSocket.last().receive('presence', { members: [] });
+  FakeSocket.last().receive('cursor', { memberId: 'x', x: 1, y: 2 });
+  expect(presence).toEqual([]);
+  expect(cursors).toEqual([]);
+  FakeSocket.last().receive('welcome', welcome);
+  FakeSocket.last().receive('presence', { members: [{ memberId: 'm', name: 'Fox', color: '#1971c2' }] });
+  FakeSocket.last().receive('cursor', { memberId: 'x', x: null, y: null });
+  expect(presence).toEqual([{ members: [{ memberId: 'm', name: 'Fox', color: '#1971c2' }] }]);
+  expect(cursors).toEqual([{ memberId: 'x', x: null, y: null }]);
+});
