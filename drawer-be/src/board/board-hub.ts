@@ -12,19 +12,22 @@ import { RoomStore } from '../rooms/room-store';
 import { RoomsService } from '../rooms/rooms.service';
 import { BoardRoom, type RoomOp } from './board-room';
 import {
+  CursorDto,
   HelloDto,
   parseMessage,
   StrokePointsDto,
   StrokeRefDto,
   StrokeStartDto,
 } from './messages';
-import type { ErrorCode, OpEvent, OpKind } from './protocol';
+import type { ErrorCode, MemberView, OpEvent, OpKind } from './protocol';
 
 interface Member {
   roomId: string;
   memberId: string;
   /** hashKey(userKey): the author of this member's strokes. */
   author: string;
+  name: string;
+  color: string;
 }
 
 interface LoadedRoom {
@@ -118,6 +121,8 @@ export class BoardHub implements BeforeApplicationShutdown {
       roomId: lr.id,
       memberId: randomBytes(6).toString('base64url'),
       author,
+      name: hello.name,
+      color: hello.color,
     };
     this.members.set(socket, member);
     lr.sockets.add(socket);
@@ -135,8 +140,10 @@ export class BoardHub implements BeforeApplicationShutdown {
     this.send(socket, 'welcome', {
       seq: lr.room.seq,
       you: { memberId: member.memberId, isOwner },
+      members: this.memberViews(lr),
       strokes: lr.room.welcomeFor(author),
     });
+    this.sendPresence(lr, socket);
   }
 
   op(socket: WebSocket, kind: OpKind, data: unknown): void {
@@ -153,6 +160,22 @@ export class BoardHub implements BeforeApplicationShutdown {
     this.scheduleSnapshot(lr);
   }
 
+  /** Relays a cursor to the other members of the room. Never stored, no seq. */
+  cursor(socket: WebSocket, data: unknown): void {
+    const member = this.members.get(socket);
+    const lr = member && this.loaded.get(member.roomId);
+    if (!member || !lr) return this.sendError(socket, 'not-joined');
+    const dto = parseMessage(CursorDto, data);
+    if (!dto) return this.sendError(socket, 'bad-op');
+    const text = JSON.stringify({
+      event: 'cursor',
+      data: { memberId: member.memberId, x: dto.x, y: dto.y },
+    });
+    for (const other of lr.sockets) {
+      if (other !== socket && other.readyState === other.OPEN) other.send(text);
+    }
+  }
+
   async leave(socket: WebSocket): Promise<void> {
     const member = this.members.get(socket);
     if (!member) return;
@@ -161,6 +184,7 @@ export class BoardHub implements BeforeApplicationShutdown {
     if (!lr || this.shuttingDown) return;
     lr.sockets.delete(socket);
     if (lr.sockets.size === 0) return this.unload(lr);
+    this.sendPresence(lr, null);
     const authorStays = [...lr.sockets].some(
       (s) => this.members.get(s)?.author === member.author,
     );
@@ -320,6 +344,28 @@ export class BoardHub implements BeforeApplicationShutdown {
   ): void {
     const event: OpEvent = { ...op, by };
     const text = JSON.stringify({ event: 'op', data: event });
+    for (const socket of lr.sockets) {
+      if (socket !== except && socket.readyState === socket.OPEN)
+        socket.send(text);
+    }
+  }
+
+  /** The members of a room in join order (spec 6.3 `members`). */
+  private memberViews(lr: LoadedRoom): MemberView[] {
+    const views: MemberView[] = [];
+    for (const socket of lr.sockets) {
+      const m = this.members.get(socket);
+      if (m) views.push({ memberId: m.memberId, name: m.name, color: m.color });
+    }
+    return views;
+  }
+
+  /** `presence { members }` to every open socket in the room except `except`. */
+  private sendPresence(lr: LoadedRoom, except: WebSocket | null): void {
+    const text = JSON.stringify({
+      event: 'presence',
+      data: { members: this.memberViews(lr) },
+    });
     for (const socket of lr.sockets) {
       if (socket !== except && socket.readyState === socket.OPEN)
         socket.send(text);

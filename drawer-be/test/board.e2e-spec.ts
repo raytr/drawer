@@ -47,15 +47,15 @@ describe('board gateway (e2e)', () => {
     return c;
   }
 
-  async function join(roomId: string, userKey: string, ownerToken?: string) {
+  async function join(
+    roomId: string,
+    userKey: string,
+    ownerToken?: string,
+    name = 'Fox',
+    color = '#1971c2',
+  ) {
     const c = await open();
-    c.send('hello', {
-      roomId,
-      userKey,
-      ownerToken,
-      name: 'Fox',
-      color: '#1971c2',
-    });
+    c.send('hello', { roomId, userKey, ownerToken, name, color });
     const welcome = await c.next('welcome');
     return { c, welcome };
   }
@@ -425,5 +425,84 @@ describe('board gateway (e2e)', () => {
     a.c.close();
     await join(roomId, KEY_A);
     await b.c.none('op', (d) => d.kind === 'stroke.end', 250);
+  });
+
+  describe('presence', () => {
+    it('welcome lists every member, the joiner included', async () => {
+      const { roomId } = await createRoom();
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B, undefined, 'Owl', '#e03131');
+      expect(a.welcome.members).toEqual([
+        { memberId: a.welcome.you.memberId, name: 'Fox', color: '#1971c2' },
+      ]);
+      expect(b.welcome.members).toEqual([
+        { memberId: a.welcome.you.memberId, name: 'Fox', color: '#1971c2' },
+        { memberId: b.welcome.you.memberId, name: 'Owl', color: '#e03131' },
+      ]);
+    });
+
+    it('a join sends presence to the others, not to the joiner', async () => {
+      const { roomId } = await createRoom();
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B, undefined, 'Owl', '#e03131');
+      expect(await a.c.next('presence')).toEqual({
+        members: b.welcome.members,
+      });
+      await b.c.none('presence');
+    });
+
+    it('a leave sends presence to the rest', async () => {
+      const { roomId } = await createRoom();
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B, undefined, 'Owl', '#e03131');
+      await a.c.next('presence');
+      b.c.close();
+      expect(await a.c.next('presence')).toEqual({
+        members: a.welcome.members,
+      });
+    });
+
+    it('two tabs with the same userKey are two members', async () => {
+      const { roomId } = await createRoom();
+      const a = await join(roomId, KEY_A);
+      const a2 = await join(roomId, KEY_A);
+      expect(
+        a2.welcome.members.map((m: { memberId: string }) => m.memberId),
+      ).toEqual([a.welcome.you.memberId, a2.welcome.you.memberId]);
+      expect(a.welcome.you.memberId).not.toBe(a2.welcome.you.memberId);
+    });
+  });
+
+  describe('cursor', () => {
+    it('a cursor goes to the others with the memberId, not back to the sender', async () => {
+      const { roomId } = await createRoom();
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B);
+      a.c.send('cursor', { x: 10, y: 20 });
+      expect(await b.c.next('cursor')).toEqual({
+        memberId: a.welcome.you.memberId,
+        x: 10,
+        y: 20,
+      });
+      await a.c.none('cursor');
+    });
+
+    it('a null cursor is relayed; a bad one gets bad-op; before hello it gets not-joined', async () => {
+      const { roomId } = await createRoom();
+      const early = await open();
+      early.send('cursor', { x: 1, y: 1 });
+      expect(await early.next('error')).toEqual({ code: 'not-joined' });
+      const a = await join(roomId, KEY_A);
+      const b = await join(roomId, KEY_B);
+      a.c.send('cursor', { x: null, y: null });
+      expect(await b.c.next('cursor')).toEqual({
+        memberId: a.welcome.you.memberId,
+        x: null,
+        y: null,
+      });
+      a.c.send('cursor', { x: 5000, y: 1 });
+      expect(await a.c.next('error')).toEqual({ code: 'bad-op' });
+      await b.c.none('cursor', (d) => d.x === 5000);
+    });
   });
 });

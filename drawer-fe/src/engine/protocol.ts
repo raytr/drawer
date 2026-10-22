@@ -29,10 +29,30 @@ export interface WelcomeStroke {
   mine: boolean;
 }
 
+/** One member of the room. One member per socket, so two tabs are two members. */
+export interface Member {
+  memberId: string;
+  name: string;
+  color: string;
+}
+
 export interface WelcomeData {
   seq: number;
   you: { memberId: string; isOwner: boolean };
+  /** Everyone in the room, this tab included, in join order. */
+  members: Member[];
   strokes: WelcomeStroke[];
+}
+
+export interface PresenceData {
+  members: Member[];
+}
+
+/** Another member's cursor in board pixels; null when it left the board. */
+export interface CursorData {
+  memberId: string;
+  x: number | null;
+  y: number | null;
 }
 
 export interface ErrorData {
@@ -51,4 +71,6 @@ export interface HelloData {
 export type ServerMessage =
   | { event: 'welcome'; data: WelcomeData }
   | { event: 'op'; data: OpEvent }
-  | { event: 'error'; data: ErrorData };
+  | { event: 'error'; data: ErrorData }
+  | { event: 'presence'; data: PresenceData }
+  | { event: 'cursor'; data: CursorData };

@@ -1,4 +1,12 @@
-import type { ErrorData, HelloData, OpEvent, ServerMessage, WelcomeData } from './protocol';
+import type {
+  CursorData,
+  ErrorData,
+  HelloData,
+  OpEvent,
+  PresenceData,
+  ServerMessage,
+  WelcomeData,
+} from './protocol';
 
 export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting' | 'expired';
 
@@ -30,6 +38,8 @@ const MAX_BACKOFF_MS = 30_000;
 export class Connection {
   onWelcome: (data: WelcomeData) => void = () => {};
   onOp: (op: OpEvent) => void = () => {};
+  onPresence: (data: PresenceData) => void = () => {};
+  onCursor: (data: CursorData) => void = () => {};
   onError: (data: ErrorData) => void = () => {};
   onStatus: (status: ConnectionStatus) => void = () => {};
 
@@ -103,6 +113,10 @@ export class Connection {
       this.onWelcome(msg.data);
     } else if (msg.event === 'op') {
       if (this.live) this.onOp(msg.data);
+    } else if (msg.event === 'presence') {
+      if (this.live) this.onPresence(msg.data);
+    } else if (msg.event === 'cursor') {
+      if (this.live) this.onCursor(msg.data);
     } else if (msg.event === 'error') {
       if (msg.data?.code === 'not-found') this.expire();
       else this.onError(msg.data);

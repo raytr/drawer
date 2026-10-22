@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createRoom } from '../api/rooms';
 import { FakeSocket } from '../test/fake-socket';
 import { BoardPage } from './BoardPage';
@@ -9,7 +9,9 @@ const mockCreate = vi.mocked(createRoom);
 const ROOM = 'R'.repeat(22);
 const ROOM2 = 'Q'.repeat(22);
 const TOKEN = 't'.repeat(43);
-const welcome = { seq: 0, you: { memberId: 'm', isOwner: true }, strokes: [] };
+const FOX = { memberId: 'm', name: 'Fox', color: '#1971c2' };
+const OWL = { memberId: 'o', name: 'Owl', color: '#e03131' };
+const welcome = { seq: 0, you: { memberId: 'm', isOwner: true }, members: [FOX], strokes: [] };
 
 function pe(type: string, init: Record<string, number | string>) {
   return Object.assign(new Event(type, { bubbles: true }), { pointerId: 1, button: 0, pointerType: 'mouse', clientX: 0, clientY: 0, ...init });
@@ -57,7 +59,7 @@ test('Share creates a room, moves to /r/<id>, shows the link, and replays the bo
   act(() => socket.open());
   expect(socket.sent[0]).toMatchObject({ event: 'hello', data: { roomId: ROOM, ownerToken: TOKEN } });
   act(() => socket.receive('welcome', welcome));
-  expect(badge()).toBe('Live');
+  expect(badge()).toBe('Live · 1');
   expect(socket.sent.map((m) => m.event)).toEqual(['hello', 'stroke.start', 'stroke.points', 'stroke.end']);
 
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -93,7 +95,7 @@ test('a lost connection shows Offline, retrying', async () => {
   expect(socket.url).toBe(`ws://${location.host}/ws`);
   act(() => socket.open());
   act(() => socket.receive('welcome', welcome));
-  expect(badge()).toBe('Live');
+  expect(badge()).toBe('Live · 1');
   act(() => socket.drop());
   expect(badge()).toBe('Offline, retrying');
 });
@@ -125,4 +127,60 @@ test('an expired room shows the expired page; a new board keeps the drawing', as
   act(() => fresh.receive('welcome', welcome));
   expect(fresh.sent.map((m) => m.event)).toEqual(['hello', 'stroke.start', 'stroke.points', 'stroke.end']);
   expect(screen.queryByRole('heading', { name: 'This board has expired' })).toBeNull();
+});
+
+test('an expired room still lets you draw locally, and a new board keeps that drawing', async () => {
+  history.replaceState(null, '', '/r/' + ROOM);
+  mockCreate.mockResolvedValue({ roomId: ROOM2, ownerToken: TOKEN });
+  const { container } = render(<BoardPage />);
+  const socket = FakeSocket.last();
+  act(() => socket.open());
+  act(() => socket.receive('error', { code: 'not-found' }));
+  // A notice, not a modal: the board stays usable (spec 10: drawing yes, local only).
+  expect(screen.getByRole('region', { name: 'This board has expired' })).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(container.ownerDocument.querySelector('.dialog-backdrop')).toBeNull();
+  drawOneStroke(container);
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Start a new board from this drawing' }));
+  await screen.findByRole('dialog', { name: 'Share this board' });
+  const fresh = FakeSocket.last();
+  act(() => fresh.open());
+  act(() => fresh.receive('welcome', welcome));
+  expect(fresh.sent.map((m) => m.event)).toEqual(['hello', 'stroke.start', 'stroke.points', 'stroke.end']);
+});
+
+test('presence shows the people and the Live count', () => {
+  history.replaceState(null, '', '/r/' + ROOM);
+  render(<BoardPage />);
+  const socket = FakeSocket.last();
+  act(() => socket.open());
+  act(() => socket.receive('welcome', { ...welcome, members: [FOX, OWL] }));
+  expect(badge()).toBe('Live · 2');
+  const list = screen.getByRole('list', { name: 'People in this room' });
+  expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Fox (you)', 'Owl']);
+  expect(document.querySelector('[data-member="o"]')).not.toBeNull();
+  act(() => socket.receive('presence', { members: [FOX] }));
+  expect(badge()).toBe('Live · 1');
+  expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Fox (you)']);
+  expect(document.querySelector('[data-member="o"]')).toBeNull();
+});
+
+test('a lost connection shows the offline toast until live again', async () => {
+  history.replaceState(null, '', '/r/' + ROOM);
+  render(<BoardPage />);
+  const toast = 'Connection lost. Keep drawing: your strokes sync when you are back.';
+  const first = FakeSocket.last();
+  act(() => first.open());
+  act(() => first.receive('welcome', { ...welcome, members: [FOX, OWL] }));
+  expect(screen.queryByText(toast)).toBeNull();
+  act(() => first.drop());
+  expect(screen.getByText(toast)).toHaveAttribute('role', 'status');
+  expect(screen.queryByRole('list', { name: 'People in this room' })).toBeNull();
+  await waitFor(() => expect(FakeSocket.instances.length).toBe(2), { timeout: 2000 });
+  const second = FakeSocket.last();
+  act(() => second.open());
+  act(() => second.receive('welcome', welcome));
+  expect(screen.queryByText(toast)).toBeNull();
+  expect(badge()).toBe('Live · 1');
 });

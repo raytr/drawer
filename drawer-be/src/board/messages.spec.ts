@@ -1,4 +1,5 @@
 import {
+  CursorDto,
   HelloDto,
   parseMessage,
   StrokePointsDto,
@@ -162,5 +163,23 @@ describe('parseMessage with hostile nesting', () => {
     expect(
       parseMessage(StrokePointsDto, { strokeId: id, n: 0, pts: [[1, 2]] }),
     ).toBeNull();
+  });
+});
+
+describe('CursorDto', () => {
+  it.each([
+    [{ x: 0, y: 0 }, true],
+    [{ x: 1919, y: 1079 }, true],
+    [{ x: null, y: null }, true],
+    [{ x: 1920, y: 0 }, false],
+    [{ x: 0, y: -1 }, false],
+    [{ x: 0, y: 1080 }, false],
+    [{ x: 1.5, y: 0 }, false],
+    [{ x: null, y: 3 }, false],
+    [{ x: 3 }, false],
+    [{ x: '1', y: 2 }, false],
+    [{ x: 1, y: 2, z: 3 }, false],
+  ])('cursor %j -> %p', (data, ok) => {
+    expect(parseMessage(CursorDto, data) !== null).toBe(ok);
   });
 });

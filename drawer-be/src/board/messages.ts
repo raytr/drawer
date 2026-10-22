@@ -67,6 +67,38 @@ export class StrokeRefDto {
   @IsString() @Matches(ID_22) strokeId: string;
 }
 
+/** Both null (the pointer left the board), or both integer board points. */
+export function isCursorPoint(x: unknown, y: unknown): boolean {
+  if (x === null && y === null) return true;
+  return (
+    Number.isInteger(x) &&
+    Number.isInteger(y) &&
+    (x as number) >= 0 &&
+    (x as number) < BOARD_WIDTH &&
+    (y as number) >= 0 &&
+    (y as number) < BOARD_HEIGHT
+  );
+}
+
+/** Checks x and y together, so one decorator rule covers both fields. */
+function IsCursorPoint(): PropertyDecorator {
+  return ValidateBy({
+    name: 'isCursorPoint',
+    validator: {
+      validate: (_value, args) => {
+        const o = args?.object as { x?: unknown; y?: unknown };
+        return isCursorPoint(o.x, o.y);
+      },
+    },
+  });
+}
+
+/** cursor: relayed to the others, never stored (spec 6.2). */
+export class CursorDto {
+  @IsCursorPoint() x: number | null;
+  @IsCursorPoint() y: number | null;
+}
+
 /** Every DTO here is flat: each field is a string, a number, a boolean, or a list of numbers. */
 function isFlat(data: object): boolean {
   for (const value of Object.values(data)) {

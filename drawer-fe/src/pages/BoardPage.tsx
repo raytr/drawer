@@ -3,34 +3,43 @@ import { flushSync } from 'react-dom';
 import { createRoom } from '../api/rooms';
 import { goTo } from '../app/route';
 import { CanvasStage } from '../components/CanvasStage';
+import { PresenceList } from '../components/PresenceList';
 import { ShareDialog } from '../components/ShareDialog';
 import { ToolPanel } from '../components/ToolPanel';
 import { TopBar, type BoardStatus } from '../components/TopBar';
 import { BoardController } from '../engine/board-controller';
 import { saveOwnerToken } from '../engine/identity';
+import { Presence } from '../engine/presence';
 import { useBoard } from '../hooks/useBoard';
+import { usePresence } from '../hooks/usePresence';
 import { useRoomConnection } from '../hooks/useRoomConnection';
 import { useRoute } from '../hooks/useRoute';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { WIDTH_STEP, initialToolSettings, toolReducer } from '../state/tool-settings';
 import { ExpiredPage } from './ExpiredPage';
 
+/** One board session: a room (or the local board) with its own controller and presence. */
+function newSession(roomId: string | null) {
+  return { roomId, controller: new BoardController(), presence: new Presence() };
+}
+
 export function BoardPage() {
   const route = useRoute();
   const routeRoom = route.kind === 'room' ? route.roomId : null;
   /** Set by Share just before it changes the URL, so that one switch keeps the board. */
   const [shareTarget, setShareTarget] = useState<string | null>(null);
-  const [session, setSession] = useState(() => ({ roomId: routeRoom, controller: new BoardController() }));
+  const [session, setSession] = useState(() => newSession(routeRoom));
   if (session.roomId !== routeRoom) {
     const keep = routeRoom !== null && shareTarget === routeRoom;
-    setSession({ roomId: routeRoom, controller: keep ? session.controller : new BoardController() });
+    setSession(keep ? { ...session, roomId: routeRoom } : newSession(routeRoom));
     if (shareTarget !== null) setShareTarget(null);
   }
-  const { controller, roomId } = session;
+  const { controller, presence, roomId } = session;
 
   const [settings, dispatch] = useReducer(toolReducer, initialToolSettings);
   const snapshot = useBoard(controller);
-  const connection = useRoomConnection(controller, roomId);
+  const connection = useRoomConnection(controller, presence, roomId);
+  const people = usePresence(presence);
   const [creating, setCreating] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -76,9 +85,11 @@ export function BoardPage() {
 
   return (
     <div className="board-page">
-      <TopBar status={status} onShare={share} />
+      <TopBar status={status} onShare={share} people={people.members.length}>
+        {roomId && people.members.length > 0 && <PresenceList snapshot={people} />}
+      </TopBar>
       <main className="board-main">
-        <CanvasStage controller={controller} settings={settings} />
+        <CanvasStage controller={controller} settings={settings} presence={roomId ? presence : null} />
         <ToolPanel
           settings={settings}
           dispatch={dispatch}
@@ -95,6 +106,11 @@ export function BoardPage() {
         </p>
       )}
       {dialogOpen && roomId && <ShareDialog url={`${location.origin}/r/${roomId}`} onClose={() => setDialogOpen(false)} />}
+      {status === 'reconnecting' && (
+        <p className="toast" role="status">
+          Connection lost. Keep drawing: your strokes sync when you are back.
+        </p>
+      )}
       {status === 'expired' && <ExpiredPage onNewBoard={startFromExpired} />}
     </div>
   );

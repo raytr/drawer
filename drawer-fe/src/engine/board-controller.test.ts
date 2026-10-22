@@ -76,7 +76,7 @@ describe('in a room', () => {
       },
     };
   }
-  const empty: WelcomeData = { seq: 0, you: { memberId: 'm', isOwner: false }, strokes: [] };
+  const empty: WelcomeData = { seq: 0, you: { memberId: 'm', isOwner: false }, members: [], strokes: [] };
   const points = (from: number, count: number) => {
     const pts: number[] = [];
     for (let i = 0; i < count; i++) pts.push(from + i, from + i);
