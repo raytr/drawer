@@ -18,13 +18,15 @@ import {
   StrokeRefDto,
   StrokeStartDto,
 } from './messages';
-import type { ErrorCode, OpEvent, OpKind } from './protocol';
+import type { ErrorCode, MemberView, OpEvent, OpKind } from './protocol';
 
 interface Member {
   roomId: string;
   memberId: string;
   /** hashKey(userKey): the author of this member's strokes. */
   author: string;
+  name: string;
+  color: string;
 }
 
 interface LoadedRoom {
@@ -118,6 +120,8 @@ export class BoardHub implements BeforeApplicationShutdown {
       roomId: lr.id,
       memberId: randomBytes(6).toString('base64url'),
       author,
+      name: hello.name,
+      color: hello.color,
     };
     this.members.set(socket, member);
     lr.sockets.add(socket);
@@ -135,8 +139,10 @@ export class BoardHub implements BeforeApplicationShutdown {
     this.send(socket, 'welcome', {
       seq: lr.room.seq,
       you: { memberId: member.memberId, isOwner },
+      members: this.memberViews(lr),
       strokes: lr.room.welcomeFor(author),
     });
+    this.sendPresence(lr, socket);
   }
 
   op(socket: WebSocket, kind: OpKind, data: unknown): void {
@@ -161,6 +167,7 @@ export class BoardHub implements BeforeApplicationShutdown {
     if (!lr || this.shuttingDown) return;
     lr.sockets.delete(socket);
     if (lr.sockets.size === 0) return this.unload(lr);
+    this.sendPresence(lr, null);
     const authorStays = [...lr.sockets].some(
       (s) => this.members.get(s)?.author === member.author,
     );
@@ -320,6 +327,28 @@ export class BoardHub implements BeforeApplicationShutdown {
   ): void {
     const event: OpEvent = { ...op, by };
     const text = JSON.stringify({ event: 'op', data: event });
+    for (const socket of lr.sockets) {
+      if (socket !== except && socket.readyState === socket.OPEN)
+        socket.send(text);
+    }
+  }
+
+  /** The members of a room in join order (spec 6.3 `members`). */
+  private memberViews(lr: LoadedRoom): MemberView[] {
+    const views: MemberView[] = [];
+    for (const socket of lr.sockets) {
+      const m = this.members.get(socket);
+      if (m) views.push({ memberId: m.memberId, name: m.name, color: m.color });
+    }
+    return views;
+  }
+
+  /** `presence { members }` to every open socket in the room except `except`. */
+  private sendPresence(lr: LoadedRoom, except: WebSocket | null): void {
+    const text = JSON.stringify({
+      event: 'presence',
+      data: { members: this.memberViews(lr) },
+    });
     for (const socket of lr.sockets) {
       if (socket !== except && socket.readyState === socket.OPEN)
         socket.send(text);

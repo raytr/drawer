@@ -24,4 +24,11 @@ export interface OpEvent {
 /** One stroke in `welcome`: the stored stroke without its author hash, plus whether it belongs to this user. */
 export type WelcomeStroke = Omit<StoredStroke, 'author'> & { mine: boolean };
 
+/** One member of a room as clients see it. One member per socket. */
+export interface MemberView {
+  memberId: string;
+  name: string;
+  color: string;
+}
+
 export type ErrorCode = 'not-found' | 'not-yours' | 'bad-op' | 'not-joined';
